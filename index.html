@@ -107,6 +107,21 @@ dialog::backdrop{background:rgba(10,20,25,.45)}
 .msg{font-size:13px;min-height:18px}
 .msg.err{color:var(--danger)} .msg.ok{color:var(--ok)}
 
+.tools{display:flex;gap:6px}
+.tools .btn{flex:1;padding:5px 8px;font-size:13px}
+.tree summary{display:flex;align-items:center}
+.tree summary .dname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dact{border:0;background:transparent;color:var(--muted);padding:0 6px;border-radius:4px;font-size:15px;line-height:1.4;opacity:.55}
+.dact:hover,.tree summary:hover .dact{opacity:1;background:var(--accent-soft)}
+.tree a .ext{font-size:11px;color:var(--muted);margin-left:4px}
+.menu{display:flex;flex-direction:column;gap:6px}
+.menu .btn{text-align:left;padding:10px 12px}
+.menu .btn.danger{color:var(--danger);border-color:var(--danger)}
+.asset img{max-width:100%;border-radius:6px}
+.asset iframe{width:100%;height:75vh;border:1px solid var(--line);border-radius:6px;background:#fff}
+.asset pre{white-space:pre-wrap}
+.warn{font-size:13px;color:var(--missing)}
+
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;font-size:14px;z-index:50}
 
 @media (max-width:760px){
@@ -129,6 +144,10 @@ dialog::backdrop{background:rgba(10,20,25,.45)}
         <span><button class="icon" id="refreshBtn" title="Tải lại từ GitHub" aria-label="Tải lại">⟳</button><button class="icon" id="settingsBtn" title="Kết nối" aria-label="Kết nối">⚙</button></span>
       </div>
       <input class="search" id="search" type="search" placeholder="Tìm trong wiki…" autocomplete="off">
+      <div class="tools">
+        <button class="btn" id="newBtn" title="Tạo ghi chú hoặc thư mục mới">＋ Mới</button>
+        <button class="btn" id="uploadBtn" title="Tải file từ máy lên vault">⤒ Tải lên</button>
+      </div>
       <div class="status" id="status"></div>
     </div>
     <nav class="tree" id="tree" aria-label="Danh sách ghi chú"></nav>
@@ -138,7 +157,8 @@ dialog::backdrop{background:rgba(10,20,25,.45)}
     <div class="bar">
       <button class="icon menu-btn" id="menuBtn" aria-label="Mở danh sách">☰</button>
       <div class="crumb" id="crumb"></div>
-      <button class="btn hide-sm" id="editBtn">Sửa</button>
+      <button class="btn" id="editBtn">Sửa</button>
+      <button class="icon" id="fileMenuBtn" title="Đổi tên, di chuyển, tải về, xóa" aria-label="Thao tác với file">⋯</button>
       <button class="btn primary" id="captureBtn">Ghi nhanh</button>
     </div>
     <div class="scroll" id="viewWrap"><article id="view"><p class="empty">Đang mở…</p></article></div>
@@ -170,6 +190,8 @@ dialog::backdrop{background:rgba(10,20,25,.45)}
     </div>
   </form>
 </dialog>
+
+<dialog id="actDlg"><form class="dlg" method="dialog" id="actForm"></form></dialog>
 
 <dialog id="capDlg">
   <form class="dlg" method="dialog" id="capForm">
@@ -257,13 +279,20 @@ function b64encode(text){
 
 /* ---------- files & index ---------- */
 const IGNORE = /^(\.obsidian|\.trash|\.git|node_modules)\//;
+const HIDDEN_FILE = /(^|\/)(\.gitkeep|\.DS_Store|Thumbs\.db)$/;
+const isMd = p => /\.md$/i.test(p);
+const TEXT_EXT = /\.(md|txt|csv|tsv|json|ya?ml|html?|css|js|xml|ics|log)$/i;
 async function loadTree(){
   status("Đang tải danh sách ghi chú…");
   const t = await gh(`${repoPath()}/git/trees/${encodeURIComponent(S.cfg.branch)}?recursive=1`);
-  S.files = t.tree.filter(x => x.type==="blob" && /\.md$/i.test(x.path) && !IGNORE.test(x.path)).map(x => ({path:x.path, sha:x.sha}));
+  S.all = t.tree.filter(x => x.type==="blob" && !IGNORE.test(x.path) && !x.path.startsWith(".")).map(x => ({path:x.path, sha:x.sha, size:x.size||0}));
+  S.files = S.all.filter(x => isMd(x.path));
+  S.dirs = new Set();
+  for (const f of S.all) { const parts = f.path.split("/"); for (let i=1;i<parts.length;i++) S.dirs.add(parts.slice(0,i).join("/")); }
   rebuildMaps();
   renderTree();
-  status(`${S.files.length} ghi chú`);
+  const other = S.all.filter(x => !isMd(x.path) && !HIDDEN_FILE.test(x.path)).length;
+  status(`${S.files.length} ghi chú` + (other ? ` · ${other} file khác` : ""));
 }
 function rebuildMaps(){
   S.byPath = new Map(S.files.map(f => [f.path, f]));
@@ -348,32 +377,85 @@ function toast(t){ const d = document.createElement("div"); d.className="toast";
 
 function renderTree(){
   const root = {dirs:{}, files:[]};
-  for (const f of S.files) {
-    const parts = f.path.split("/"); let node = root;
-    for (const p of parts.slice(0,-1)) node = node.dirs[p] ||= {dirs:{}, files:[]};
-    node.files.push(f.path);
+  const node = path => { let n = root; if (path) for (const p of path.split("/")) n = n.dirs[p] ||= {dirs:{}, files:[]}; return n; };
+  for (const d of S.dirs || []) node(d);
+  for (const f of S.all || S.files) {
+    if (HIDDEN_FILE.test(f.path)) continue;
+    const i = f.path.lastIndexOf("/");
+    node(i === -1 ? "" : f.path.slice(0,i)).files.push(f.path);
   }
-  const openByDefault = new Set(["wiki","notes","raw","inbox"]);
+  const openState = S.openDirs || (S.openDirs = new Set(["wiki","notes","raw","raw/inbox"]));
   const rootOrder = ["index","log","CLAUDE"];
-  const walk = (node, depth, name) => {
+  const fileName = p => p.split("/").pop();
+  const walk = (n, depth, prefix) => {
     let h = "";
-    const files = node.files.slice().sort((a,b) => {
+    const files = n.files.slice().sort((a,b) => {
       if (depth===0) { const ia = rootOrder.indexOf(baseName(a)), ib = rootOrder.indexOf(baseName(b)); if (ia!==-1||ib!==-1) return (ia===-1?99:ia)-(ib===-1?99:ib); }
-      return baseName(a).localeCompare(baseName(b), "vi");
+      return fileName(a).localeCompare(fileName(b), "vi");
     });
-    for (const d of Object.keys(node.dirs).sort((a,b)=>a.localeCompare(b,"vi"))) {
-      if (d === "templates" && depth === 0) continue;
-      h += `<details ${openByDefault.has(d)?"open":""}><summary>${esc(d)}</summary>${walk(node.dirs[d], depth+1, d)}</details>`;
+    for (const d of Object.keys(n.dirs).sort((a,b)=>a.localeCompare(b,"vi"))) {
+      const full = prefix ? prefix + "/" + d : d;
+      h += `<details data-dir="${esc(full)}" ${openState.has(full)?"open":""}><summary><span class="dname">${esc(d)}</span><button type="button" class="dact" data-dir="${esc(full)}" title="Thao tác với thư mục" aria-label="Thao tác với thư mục ${esc(d)}">⋯</button></summary>${walk(n.dirs[d], depth+1, full)}</details>`;
     }
-    for (const p of files) h += `<a href="#/${encPath(p)}" data-path="${esc(p)}">${esc(baseName(p))}</a>`;
+    for (const p of files) {
+      const md = isMd(p); const ext = md ? "" : `<span class="ext">${esc((p.split(".").pop()||"").toLowerCase())}</span>`;
+      h += `<a href="#/${encPath(p)}" data-path="${esc(p)}">${md ? "" : "📄 "}${esc(md ? baseName(p) : fileName(p).replace(/\.[^.]+$/,""))}${ext}</a>`;
+    }
     return h;
   };
   $("tree").innerHTML = walk(root, 0, "") || `<p class="empty" style="padding:8px">Vault trống.</p>`;
+  $("tree").querySelectorAll("details[data-dir]").forEach(d => d.addEventListener("toggle", () => { d.open ? openState.add(d.dataset.dir) : openState.delete(d.dataset.dir); }));
   markActive();
 }
 function markActive(){ $("tree").querySelectorAll("a").forEach(a => a.classList.toggle("active", a.dataset.path === S.current)); }
 
+const MIME = {png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml",heic:"image/heic",
+  pdf:"application/pdf",txt:"text/plain",csv:"text/csv",json:"application/json",html:"text/plain",htm:"text/plain",
+  docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",zip:"application/zip",mp4:"video/mp4",mp3:"audio/mpeg"};
+const extOf = p => (p.split(".").pop()||"").toLowerCase();
+const findAny = p => (S.all || S.files).find(f => f.path === p);
+function fmtSize(n){ return n < 1024 ? n + " B" : n < 1048576 ? (n/1024).toFixed(0) + " KB" : (n/1048576).toFixed(1) + " MB"; }
+async function blobUrl(f){
+  if (S.urls?.has(f.sha)) return S.urls.get(f.sha);
+  const b = await gh(`${repoPath()}/git/blobs/${f.sha}`);
+  const bin = atob(b.content.replace(/\n/g,"")); const bytes = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], {type: MIME[extOf(f.path)] || "application/octet-stream"}));
+  (S.urls ||= new Map()).set(f.sha, url); return url;
+}
+async function downloadFile(path){
+  const f = findAny(path); if (!f) return;
+  toast("Đang tải về…");
+  try { const a = document.createElement("a"); a.href = await blobUrl(f); a.download = path.split("/").pop(); document.body.appendChild(a); a.click(); a.remove(); }
+  catch(e){ toast(e.message); }
+}
+async function openAsset(f){
+  const path = f.path, ext = extOf(path), name = path.split("/").pop();
+  S.current = path; markActive(); showView();
+  $("crumb").textContent = path; document.title = name + " · Second Brain";
+  $("view").innerHTML = `<p class="empty">Đang mở ${esc(name)} (${fmtSize(f.size)})…</p>`;
+  $("side").classList.remove("open");
+  try {
+    let inner;
+    if (TEXT_EXT.test(path)) inner = `<pre>${esc(await getText(f))}</pre>`;
+    else {
+      const url = await blobUrl(f);
+      if (/^(png|jpe?g|gif|webp|svg)$/.test(ext)) inner = `<img src="${url}" alt="${esc(name)}">`;
+      else if (ext === "pdf") inner = `<iframe src="${url}" title="${esc(name)}"></iframe>`;
+      else if (ext === "mp4") inner = `<video src="${url}" controls style="max-width:100%"></video>`;
+      else if (ext === "mp3") inner = `<audio src="${url}" controls></audio>`;
+      else inner = `<p class="empty">Trình duyệt không xem trước được loại file này.</p>`;
+    }
+    if (S.current !== path) return;
+    $("view").innerHTML = `<h1>${esc(name)}</h1><div class="props"><span>kích thước <b>${fmtSize(f.size)}</b></span></div>
+      <p><button class="btn" id="dlBtn" type="button">⤓ Tải về máy</button></p><div class="asset">${inner}</div>`;
+    $("dlBtn").onclick = () => downloadFile(path);
+  } catch(e) { $("view").innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+}
+
 async function openNote(path){
+  if (!isMd(path)) { const a = findAny(path); if (a) return openAsset(a); }
   const f = S.byPath.get(path);
   if (!f) { $("view").innerHTML = `<p class="empty">Không tìm thấy <b>${esc(path)}</b>. Có thể nó vừa bị đổi tên. Bấm ⟳ để tải lại.</p>`; return; }
   S.current = path; markActive(); showView();
@@ -427,8 +509,15 @@ async function putFile(path, text, sha, message){
   const r = await gh(`${repoPath()}/contents/${encPath(path)}`, {method:"PUT", body:JSON.stringify(body)});
   const newSha = r.content.sha;
   S.text.set(newSha, text); cachePut(newSha, text);
-  const existing = S.byPath.get(path);
-  if (existing) existing.sha = newSha; else S.files.push({path, sha:newSha});
+  const size = new TextEncoder().encode(text).length;
+  const existing = findAny(path);
+  if (existing) { existing.sha = newSha; existing.size = size; }
+  else {
+    const rec = {path, sha:newSha, size};
+    if (S.all) S.all.push(rec);
+    if (isMd(path)) S.files.push(S.all ? rec : {path, sha:newSha});
+    const parts = path.split("/"); for (let i=1;i<parts.length;i++) S.dirs?.add(parts.slice(0,i).join("/"));
+  }
   rebuildMaps(); if (S.indexed) buildBacklinks();
   return newSha;
 }
@@ -436,14 +525,16 @@ function showView(){ $("editWrap").classList.add("hidden"); $("viewWrap").classL
 async function startEdit(){
   if (!S.current) return;
   if (!$("editWrap").classList.contains("hidden")) { showView(); return; }
-  const f = S.byPath.get(S.current);
+  const f = findAny(S.current);
+  if (!f || !TEXT_EXT.test(f.path)) { toast("Loại file này không sửa được trên web. Dùng ⋯ để đổi tên, tải về hoặc xóa."); return; }
   $("editText").value = await getText(f);
-  $("editMsg").textContent = ""; $("editMsg").className = "msg";
+  const guard = /^raw\/sources\//.test(f.path) ? "Lưu ý: raw/sources là bằng chứng gốc, CLAUDE.md quy định không sửa nội dung." : "";
+  $("editMsg").textContent = guard; $("editMsg").className = guard ? "msg warn" : "msg";
   $("viewWrap").classList.add("hidden"); $("editWrap").classList.remove("hidden"); $("editBtn").textContent = "Xem";
   $("editText").focus();
 }
 async function saveEdit(){
-  const f = S.byPath.get(S.current); const btn = $("saveEdit");
+  const f = findAny(S.current); const btn = $("saveEdit");
   btn.disabled = true; $("editMsg").className="msg"; $("editMsg").textContent = "Đang lưu…";
   try { await putFile(f.path, $("editText").value, f.sha, `edit(web): ${f.path}`); toast("Đã lưu lên GitHub"); openNote(f.path); }
   catch(e) { $("editMsg").className="msg err"; $("editMsg").textContent = e.message; }
@@ -469,6 +560,229 @@ async function saveCapture(ev){
     $("capDlg").close(); $("capTitle").value=""; $("capBody").value=""; $("capMsg").textContent="";
     renderTree(); toast(dest==="raw/inbox" ? "Đã lưu vào inbox" : "Đã lưu vào notes"); location.hash = "#/" + encPath(path);
   } catch(e) { $("capMsg").className="msg err"; $("capMsg").textContent=e.message; }
+}
+
+/* ---------- file manager: mỗi thao tác = 1 commit qua Git Data API ---------- */
+async function commitChanges(changes, message){
+  // changes: [{path, sha}] (sha = blob sha để tạo/ghi đè; sha = null để xóa)
+  const br = encodeURIComponent(S.cfg.branch);
+  const ref = await gh(`${repoPath()}/git/ref/heads/${br}`);
+  const head = await gh(`${repoPath()}/git/commits/${ref.object.sha}`);
+  const tree = await gh(`${repoPath()}/git/trees`, {method:"POST", body:JSON.stringify({
+    base_tree: head.tree.sha, tree: changes.map(c => ({path:c.path, mode:"100644", type:"blob", sha:c.sha}))})});
+  const commit = await gh(`${repoPath()}/git/commits`, {method:"POST", body:JSON.stringify({message, tree:tree.sha, parents:[ref.object.sha]})});
+  try { await gh(`${repoPath()}/git/refs/heads/${br}`, {method:"PATCH", body:JSON.stringify({sha:commit.sha})}); }
+  catch(e){ if (e.status === 422) throw new Error("Vault vừa có thay đổi từ nơi khác (Obsidian/agent). Bấm ⟳ rồi làm lại."); throw e; }
+}
+async function makeBlob(content, encoding){
+  return (await gh(`${repoPath()}/git/blobs`, {method:"POST", body:JSON.stringify({content, encoding})})).sha;
+}
+async function reloadAfter(openPath){
+  S.indexed = false; await loadTree();
+  if (openPath && findAny(openPath)) { if (location.hash === "#/" + encPath(openPath)) openNote(openPath); else location.hash = "#/" + encPath(openPath); }
+  else if (S.current && !findAny(S.current)) { S.current = null; location.hash = ""; route(); }
+  indexAll();
+}
+const cleanPath = p => p.trim().replace(/\\/g,"/").replace(/\/{2,}/g,"/").replace(/^\/|\/$/g,"");
+const badPath = p => !p || /(^|\/)\.\.?(\/|$)/.test(p) || /[<>:"|?*\u0000-\u001f]/.test(p);
+const dirOf = p => p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+const today = () => { const d = new Date(), z = n => String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; };
+
+/* hộp thoại dùng chung */
+function dialog(html, bind){
+  const f = $("actForm"); f.innerHTML = html; $("actDlg").showModal();
+  f.querySelectorAll("[data-close]").forEach(b => b.onclick = () => $("actDlg").close());
+  bind && bind(f);
+}
+function dirOptions(sel){
+  const dirs = ["", ...[...(S.dirs||[])].sort((a,b)=>a.localeCompare(b,"vi"))];
+  return dirs.map(d => `<option value="${esc(d)}" ${d===sel?"selected":""}>${d ? esc(d) : "(thư mục gốc)"}</option>`).join("");
+}
+function busy(f, on, text){ f.querySelectorAll("button,input,select").forEach(x => x.disabled = on); const m = f.querySelector(".msg"); if (m){ m.className = "msg"; m.textContent = text || ""; } }
+function fail(f, e){ busy(f, false); const m = f.querySelector(".msg"); m.className = "msg err"; m.textContent = e.message || e; }
+
+/* tạo ghi chú / thư mục */
+function openNew(dir){
+  if (!S.cfg) return openSetup();
+  const here = dir ?? (S.current ? dirOf(S.current) : "notes");
+  const tpls = (S.files||[]).filter(f => f.path.startsWith("templates/")).map(f => f.path);
+  dialog(`<h2>Tạo mới</h2>
+    <label>Loại<select id="nKind"><option value="note">Ghi chú (.md)</option><option value="dir">Thư mục</option></select></label>
+    <label>Trong thư mục<select id="nDir">${dirOptions(here)}</select></label>
+    <label>Tên<input type="text" id="nName" placeholder="Ví dụ: y-tuong-activation-tet" autocomplete="off"></label>
+    <label id="nTplWrap">Template<select id="nTpl"><option value="">(trống)</option>${tpls.map(t => `<option value="${esc(t)}">${esc(baseName(t))}</option>`).join("")}</select></label>
+    <p class="warn" id="nHint"></p><div class="msg"></div>
+    <div class="actions"><button class="btn" type="button" data-close>Hủy</button><button class="btn primary" type="submit">Tạo</button></div>`, f => {
+    const hint = () => { const k = $("nKind").value, d = $("nDir").value;
+      $("nTplWrap").classList.toggle("hidden", k === "dir");
+      $("nHint").textContent = /^wiki(\/|$)/.test(d) ? "wiki/ do agent bảo trì: nên đặt tên chữ thường, không dấu, nối bằng gạch ngang." :
+        /^raw\/sources/.test(d) ? "raw/sources là nguồn gốc chỉ-đọc; tài liệu mới nên bỏ vào raw/inbox." : ""; };
+    $("nKind").onchange = hint; $("nDir").onchange = hint; hint(); $("nName").focus();
+    f.onsubmit = async ev => { ev.preventDefault();
+      const kind = $("nKind").value, name = $("nName").value.trim();
+      if (!name) return fail(f, "Nhập tên trước.");
+      const base = kind === "dir" ? cleanPath(name) : cleanPath(name).replace(/\.md$/i,"");
+      const path = cleanPath(($("nDir").value ? $("nDir").value + "/" : "") + base + (kind === "dir" ? "/.gitkeep" : ".md"));
+      if (badPath(path)) return fail(f, "Tên có ký tự không hợp lệ.");
+      if (findAny(path) || (kind === "dir" && S.dirs.has(dirOf(path)))) return fail(f, "Đã có file/thư mục trùng tên.");
+      busy(f, true, "Đang tạo…");
+      try {
+        if (kind === "dir") { await putFile(path, "\n", null, `mkdir(web): ${dirOf(path)}`); S.openDirs.add(dirOf(path)); renderTree(); $("actDlg").close(); toast("Đã tạo thư mục"); return; }
+        const title = base.split("/").pop();
+        let text = `---\ntitle: ${title}\ncreated: ${today()}\n---\n\n# ${title}\n\n`;
+        const tpl = $("nTpl").value;
+        if (tpl) text = (await getText(findAny(tpl))).replace(/\{\{title\}\}/g, title).replace(/\{\{date\}\}/g, today()).replace(/^title:\s*$/m, `title: ${title}`);
+        await putFile(path, text, null, `create(web): ${path}`);
+        renderTree(); $("actDlg").close();
+        try { history.pushState(null, "", "#/" + encPath(path)); } catch(e){}
+        await openNote(path); await startEdit();
+      } catch(e){ fail(f, e); }
+    };
+  });
+}
+
+/* tải file lên */
+const MAX_MB = 25;
+function openUpload(dir){
+  if (!S.cfg) return openSetup();
+  const here = dir ?? (S.current ? dirOf(S.current) : "raw/inbox");
+  dialog(`<h2>Tải file lên</h2>
+    <label>Vào thư mục<select id="uDir">${dirOptions(here)}</select></label>
+    <label>Chọn file (chọn được nhiều file)<input type="file" id="uFiles" multiple></label>
+    <p class="warn">Tối đa ${MAX_MB} MB/file. PDF, video lớn nên để Google Drive rồi dán link (CLAUDE.md). Tài liệu mới để agent ingest thì bỏ vào raw/inbox.</p>
+    <div class="msg"></div>
+    <div class="actions"><button class="btn" type="button" data-close>Hủy</button><button class="btn primary" type="submit">Tải lên</button></div>`, f => {
+    f.onsubmit = async ev => { ev.preventDefault();
+      const files = [...$("uFiles").files]; const dir = $("uDir").value;
+      if (!files.length) return fail(f, "Chưa chọn file nào.");
+      const big = files.filter(x => x.size > MAX_MB*1048576);
+      if (big.length) return fail(f, "Quá lớn: " + big.map(x => x.name).join(", "));
+      busy(f, true, "Đang tải lên…");
+      try {
+        const changes = []; let last = null;
+        for (const [i, file] of files.entries()) {
+          f.querySelector(".msg").textContent = `Đang tải ${i+1}/${files.length}: ${file.name}`;
+          const buf = new Uint8Array(await file.arrayBuffer()); let bin = "";
+          for (let j=0;j<buf.length;j+=0x8000) bin += String.fromCharCode.apply(null, buf.subarray(j,j+0x8000));
+          let path = cleanPath((dir ? dir + "/" : "") + file.name.replace(/[<>:"|?*\/\\]/g,"-"));
+          const dot = path.lastIndexOf("."); let n = 2;
+          while (findAny(path) || changes.some(c => c.path === path)) path = dot > path.lastIndexOf("/") ? path.slice(0,dot).replace(/-\d+$/,"") + "-" + (n++) + path.slice(dot) : path + "-" + (n++);
+          changes.push({path, sha: await makeBlob(btoa(bin), "base64")}); last = path;
+        }
+        f.querySelector(".msg").textContent = "Đang lưu lên GitHub…";
+        await commitChanges(changes, `upload(web): ${changes.length} file vào ${dir || "/"}`);
+        $("actDlg").close(); toast(`Đã tải lên ${changes.length} file`); await reloadAfter(last);
+      } catch(e){ fail(f, e); }
+    };
+  });
+}
+
+/* đổi tên / di chuyển (file hoặc thư mục), tự sửa [[link]] */
+function relinkChanges(renames){
+  // renames: Map oldPath -> newPath (chỉ .md). Trả về danh sách {path, text} cần ghi lại.
+  const out = [];
+  for (const f of S.files) {
+    const txt = S.text.get(f.sha); if (!txt) continue;
+    let changed = false;
+    const nt = txt.replace(WL, (all, bang, inner) => {
+      const [tgt, ...alias] = inner.split("|"); const [t0, ...hash] = tgt.split("#");
+      const to = resolve(t0); if (!to || !renames.has(to)) return all;
+      const oldB = baseName(to), newB = baseName(renames.get(to));
+      if (oldB === newB && !t0.includes("/")) return all;
+      changed = true;
+      const target = t0.includes("/") ? renames.get(to).replace(/\.md$/i,"") : newB;
+      return `${bang}[[${target}${hash.length ? "#" + hash.join("#") : ""}${alias.length ? "|" + alias.join("|") : ""}]]`;
+    });
+    if (changed) out.push({path: renames.get(f.path) || f.path, text: nt});
+  }
+  return out;
+}
+function openMove(src, isDir){
+  const count = isDir ? S.all.filter(x => x.path.startsWith(src + "/")).length : 1;
+  dialog(`<h2>${isDir ? "Đổi tên / di chuyển thư mục" : "Đổi tên / di chuyển file"}</h2>
+    <p>${esc(src)}${isDir ? ` · ${count} file bên trong` : ""}</p>
+    <label>Đường dẫn mới<input type="text" id="mPath" value="${esc(src)}" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" id="mLinks" checked> Tự sửa các [[link]] ở trang khác trỏ tới đây</label>
+    ${S.indexed ? "" : `<p class="warn">Đang đọc vault, đợi vài giây để sửa link được đầy đủ.</p>`}
+    <div class="msg"></div>
+    <div class="actions"><button class="btn" type="button" data-close>Hủy</button><button class="btn primary" type="submit">Lưu</button></div>`, f => {
+    const inp = $("mPath"); inp.focus(); const cut = isDir ? src.length : src.lastIndexOf(".") > src.lastIndexOf("/") ? src.lastIndexOf(".") : src.length;
+    inp.setSelectionRange(src.lastIndexOf("/")+1, cut);
+    f.onsubmit = async ev => { ev.preventDefault();
+      let dst = cleanPath(inp.value);
+      if (!isDir && isMd(src) && !/\.[^\/.]+$/.test(dst)) dst += ".md";
+      if (dst === src) return $("actDlg").close();
+      if (badPath(dst)) return fail(f, "Đường dẫn không hợp lệ.");
+      if (isDir && (dst + "/").startsWith(src + "/")) return fail(f, "Không thể chuyển thư mục vào chính nó.");
+      if (findAny(dst) || (isDir && S.dirs.has(dst))) return fail(f, "Đã có file/thư mục ở đường dẫn này.");
+      busy(f, true, "Đang di chuyển…");
+      try {
+        const moves = isDir ? S.all.filter(x => x.path.startsWith(src + "/")).map(x => [x, dst + x.path.slice(src.length)]) : [[findAny(src), dst]];
+        const changes = [];
+        for (const [x, np] of moves) changes.push({path:x.path, sha:null}, {path:np, sha:x.sha});
+        if ($("mLinks").checked) {
+          const ren = new Map(moves.filter(([x]) => isMd(x.path)).map(([x, np]) => [x.path, np]));
+          const edits = relinkChanges(ren);
+          for (const e of edits) {
+            const sha = await makeBlob(e.text, "utf-8");
+            const i = changes.findIndex(c => c.path === e.path && c.sha); if (i >= 0) changes[i].sha = sha; else changes.push({path:e.path, sha});
+          }
+          if (edits.length) f.querySelector(".msg").textContent = `Sửa link ở ${edits.length} trang…`;
+        }
+        await commitChanges(changes, `move(web): ${src} → ${dst}`);
+        if (isDir && S.openDirs.has(src)) S.openDirs.add(dst);
+        $("actDlg").close(); toast("Đã di chuyển"); await reloadAfter(isDir ? (S.current?.startsWith(src + "/") ? dst + S.current.slice(src.length) : null) : dst);
+      } catch(e){ fail(f, e); }
+    };
+  });
+}
+
+/* xóa (file hoặc thư mục) */
+async function doDelete(src, isDir){
+  const list = isDir ? S.all.filter(x => x.path.startsWith(src + "/")) : [findAny(src)];
+  const inbound = isDir ? 0 : (S.back.get(src)?.size || 0);
+  const warn = /^raw\/sources\//.test(src) ? "\n\n⚠ raw/sources là bằng chứng gốc của wiki." : /^(CLAUDE|index|log)\.md$/.test(src) ? "\n\n⚠ Đây là file hệ thống của vault." : "";
+  const msg = isDir ? `Xóa thư mục "${src}" cùng ${list.length} file bên trong?` : `Xóa "${src}"?` + (inbound ? `\n${inbound} trang đang link tới file này.` : "");
+  if (!confirm(msg + warn + "\n\nVẫn khôi phục được từ lịch sử GitHub nếu cần.")) return;
+  if (isDir && list.length > 5 && prompt(`Gõ tên thư mục "${src.split("/").pop()}" để xác nhận:`) !== src.split("/").pop()) return toast("Đã hủy");
+  try { toast("Đang xóa…"); await commitChanges(list.map(x => ({path:x.path, sha:null})), `delete(web): ${src}${isDir ? "/" : ""}`); $("actDlg").close(); toast("Đã xóa"); await reloadAfter(null); }
+  catch(e){ toast(e.message); }
+}
+
+/* menu thao tác */
+function fileMenu(){
+  if (!S.cfg) return openSetup();
+  if (!S.current) return toast("Mở một file trước.");
+  const p = S.current, text = TEXT_EXT.test(p);
+  dialog(`<h2>${esc(p.split("/").pop())}</h2><p>${esc(p)}</p><div class="menu">
+    ${text ? `<button class="btn" type="button" id="aEdit">✎ Sửa nội dung</button>` : ""}
+    <button class="btn" type="button" id="aMove">↔ Đổi tên / di chuyển</button>
+    <button class="btn" type="button" id="aDl">⤓ Tải về máy</button>
+    <button class="btn" type="button" id="aNew">＋ Tạo mới trong thư mục này</button>
+    <button class="btn" type="button" id="aUp">⤒ Tải file lên thư mục này</button>
+    <button class="btn danger" type="button" id="aDel">🗑 Xóa file</button>
+    <button class="btn" type="button" data-close>Đóng</button></div>`, () => {
+    if (text) $("aEdit").onclick = () => { $("actDlg").close(); startEdit(); };
+    $("aMove").onclick = () => openMove(p, false);
+    $("aDl").onclick = () => { $("actDlg").close(); downloadFile(p); };
+    $("aNew").onclick = () => openNew(dirOf(p));
+    $("aUp").onclick = () => openUpload(dirOf(p));
+    $("aDel").onclick = () => doDelete(p, false);
+  });
+}
+function dirMenu(d){
+  const n = S.all.filter(x => x.path.startsWith(d + "/") && !HIDDEN_FILE.test(x.path)).length;
+  dialog(`<h2>📁 ${esc(d.split("/").pop())}</h2><p>${esc(d)} · ${n} file</p><div class="menu">
+    <button class="btn" type="button" id="dNew">＋ Tạo ghi chú / thư mục con</button>
+    <button class="btn" type="button" id="dUp">⤒ Tải file lên đây</button>
+    <button class="btn" type="button" id="dMove">↔ Đổi tên / di chuyển thư mục</button>
+    <button class="btn danger" type="button" id="dDel">🗑 Xóa thư mục</button>
+    <button class="btn" type="button" data-close>Đóng</button></div>`, () => {
+    $("dNew").onclick = () => openNew(d);
+    $("dUp").onclick = () => openUpload(d);
+    $("dMove").onclick = () => openMove(d, true);
+    $("dDel").onclick = () => doDelete(d, true);
+  });
 }
 
 /* ---------- boot ---------- */
@@ -511,6 +825,13 @@ $("editBtn").onclick = startEdit;
 $("cancelEdit").onclick = showView;
 $("saveEdit").onclick = saveEdit;
 $("menuBtn").onclick = () => $("side").classList.toggle("open");
+$("newBtn").onclick = () => openNew();
+$("uploadBtn").onclick = () => openUpload();
+$("fileMenuBtn").onclick = fileMenu;
+$("tree").addEventListener("click", e => {
+  const b = e.target.closest(".dact"); if (!b) return;
+  e.preventDefault(); e.stopPropagation(); if (!S.cfg) return openSetup(); dirMenu(b.dataset.dir);
+});
 $("search").addEventListener("input", runSearch);
 window.addEventListener("hashchange", route);
 document.addEventListener("keydown", e => {
