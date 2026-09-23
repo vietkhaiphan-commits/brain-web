@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f4e6e">
+<meta name="robots" content="noindex">
+<title>Second Brain</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+:root{
+  --paper:#f4f6f5; --panel:#e9edeb; --ink:#1c2a33; --muted:#5f6f78; --line:#cfd8d5;
+  --accent:#1f4e6e; --accent-soft:#dce8ef; --missing:#9a5b12; --ok:#2f6b45; --danger:#9b2f2f;
+  --read:"Newsreader", Georgia, "Times New Roman", serif;
+  --ui:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root{--paper:#161c20;--panel:#1d252a;--ink:#dfe7ea;--muted:#8fa0a8;--line:#2e3a40;
+    --accent:#8fbcd9;--accent-soft:#233642;--missing:#e0a45a;--ok:#7cc496;--danger:#e58a8a;}
+}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--ui);}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hidden{display:none!important}
+
+/* Layout */
+.app{display:grid;grid-template-columns:300px 1fr;height:100%}
+.side{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.side-head{padding:14px 14px 10px;display:flex;flex-direction:column;gap:10px}
+.brand{display:flex;align-items:center;justify-content:space-between}
+.brand strong{font-family:var(--read);font-size:20px;font-weight:600;letter-spacing:.01em}
+.search{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--paper)}
+.status{font-size:12px;color:var(--muted);min-height:18px}
+.tree{overflow:auto;padding:0 8px 16px;flex:1}
+.tree details{margin-left:6px}
+.tree summary{padding:3px 6px;border-radius:4px;color:var(--muted);font-weight:500;list-style:none;cursor:pointer}
+.tree summary::before{content:"▸";display:inline-block;width:14px;transition:transform .15s}
+.tree details[open]>summary::before{transform:rotate(90deg)}
+.tree summary::-webkit-details-marker{display:none}
+.tree a{display:block;padding:3px 6px 3px 20px;border-radius:4px;color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree a:hover{background:var(--accent-soft)}
+.tree a.active{background:var(--accent);color:var(--paper)}
+.result{display:block;padding:8px;border-radius:6px;text-decoration:none;color:var(--ink)}
+.result:hover{background:var(--accent-soft)}
+.result small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.crumb{flex:1;min-width:0;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{border:1px solid var(--line);background:transparent;border-radius:6px;padding:6px 12px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:500}
+.icon{border:0;background:transparent;padding:6px 8px;border-radius:6px;font-size:16px}
+.icon:hover{background:var(--accent-soft)}
+.menu-btn{display:none}
+
+.scroll{overflow:auto;flex:1}
+article{max-width:70ch;margin:0 auto;padding:32px 24px 80px;font-family:var(--read);font-size:18px;line-height:1.65}
+article h1{font-size:34px;line-height:1.15;margin:0 0 8px;font-weight:600}
+article h2{font-size:24px;margin:1.8em 0 .5em;font-weight:600}
+article h3{font-size:19px;margin:1.5em 0 .4em;font-weight:600}
+article a{color:var(--accent)}
+article a.wl{text-decoration:none;border-bottom:1px dotted currentColor}
+article a.wl:hover{border-bottom-style:solid}
+article .wl.missing{color:var(--missing);border-bottom:1px dashed currentColor}
+article code{font-family:ui-monospace,Consolas,monospace;font-size:.85em;background:var(--panel);padding:1px 5px;border-radius:4px}
+article pre{background:var(--panel);padding:12px 14px;border-radius:6px;overflow-x:auto}
+article pre code{background:none;padding:0}
+article blockquote{margin:1em 0;padding-left:16px;border-left:3px solid var(--line);color:var(--muted)}
+article table{border-collapse:collapse;display:block;overflow-x:auto;font-family:var(--ui);font-size:14px}
+article th,article td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+article img{max-width:100%}
+article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.props{font-family:var(--ui);font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 24px}
+.props span b{font-weight:500;color:var(--ink)}
+.backlinks{font-family:var(--ui);font-size:14px;margin-top:48px;padding-top:16px;border-top:1px solid var(--line)}
+.backlinks h4{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--muted)}
+.backlinks a{display:block;padding:4px 0;color:var(--accent);text-decoration:none}
+.empty{color:var(--muted);font-family:var(--ui);font-size:15px}
+
+.editor{flex:1;display:flex;flex-direction:column;min-height:0;padding:16px}
+.editor textarea{flex:1;width:100%;max-width:90ch;margin:0 auto;resize:none;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:16px;font:15px/1.6 ui-monospace,Consolas,monospace}
+
+/* Dialogs */
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);padding:0;width:min(560px,94vw)}
+dialog::backdrop{background:rgba(10,20,25,.45)}
+.dlg{padding:20px;display:flex;flex-direction:column;gap:12px}
+.dlg h2{margin:0;font-family:var(--read);font-size:24px;font-weight:600}
+.dlg p{margin:0;color:var(--muted);font-size:14px}
+.dlg label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:500}
+.dlg input[type=text],.dlg input[type=password],.dlg textarea,.dlg select{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-weight:400;font-size:15px}
+.dlg textarea{min-height:180px;resize:vertical}
+.dlg .row{display:flex;gap:10px}
+.dlg .row>*{flex:1}
+.dlg .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.check{flex-direction:row!important;align-items:center;gap:8px!important;font-weight:400!important}
+.msg{font-size:13px;min-height:18px}
+.msg.err{color:var(--danger)} .msg.ok{color:var(--ok)}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;font-size:14px;z-index:50}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  .side{position:fixed;inset:0 20% 0 0;z-index:20;transform:translateX(-102%);transition:transform .2s;padding-top:env(safe-area-inset-top,0px)}
+  .side.open{transform:none;box-shadow:0 0 0 100vw rgba(10,20,25,.4)}
+  .menu-btn{display:inline-block}
+  article{padding:22px 18px 80px;font-size:17px}
+  article h1{font-size:28px}
+  .hide-sm{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="side-head">
+      <div class="brand"><strong>Second Brain</strong>
+        <span><button class="icon" id="refreshBtn" title="Tải lại từ GitHub" aria-label="Tải lại">⟳</button><button class="icon" id="settingsBtn" title="Kết nối" aria-label="Kết nối">⚙</button></span>
+      </div>
+      <input class="search" id="search" type="search" placeholder="Tìm trong wiki…" autocomplete="off">
+      <div class="status" id="status"></div>
+    </div>
+    <nav class="tree" id="tree" aria-label="Danh sách ghi chú"></nav>
+  </aside>
+
+  <main class="main">
+    <div class="bar">
+      <button class="icon menu-btn" id="menuBtn" aria-label="Mở danh sách">☰</button>
+      <div class="crumb" id="crumb"></div>
+      <button class="btn hide-sm" id="editBtn">Sửa</button>
+      <button class="btn primary" id="captureBtn">Ghi nhanh</button>
+    </div>
+    <div class="scroll" id="viewWrap"><article id="view"><p class="empty">Đang mở…</p></article></div>
+    <div class="editor hidden" id="editWrap">
+      <textarea id="editText" spellcheck="false" aria-label="Nội dung markdown"></textarea>
+      <div class="dlg" style="padding:10px 0 0;max-width:90ch;margin:0 auto;width:100%">
+        <div class="actions"><span class="msg" id="editMsg" style="margin-right:auto"></span>
+          <button class="btn" id="cancelEdit">Hủy</button><button class="btn primary" id="saveEdit">Lưu lên GitHub</button></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="setupDlg">
+  <form class="dlg" method="dialog" id="setupForm">
+    <h2>Kết nối vault</h2>
+    <p>Web app đọc và ghi trực tiếp vào repo GitHub riêng tư chứa vault Obsidian của bạn. Token chỉ nằm trong trình duyệt này.</p>
+    <div class="row">
+      <label>GitHub username<input type="text" id="cfgOwner" required autocomplete="off"></label>
+      <label>Tên repo<input type="text" id="cfgRepo" required value="second-brain" autocomplete="off"></label>
+    </div>
+    <label>Nhánh<input type="text" id="cfgBranch" value="main" autocomplete="off"></label>
+    <label>Fine-grained token<input type="password" id="cfgToken" required autocomplete="off" placeholder="github_pat_…"></label>
+    <label class="check"><input type="checkbox" id="cfgRemember"> Ghi nhớ trên thiết bị này (bỏ chọn trên máy dùng chung)</label>
+    <div class="msg" id="setupMsg"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="forgetBtn">Xóa kết nối</button>
+      <button class="btn primary" type="submit">Kết nối</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="capDlg">
+  <form class="dlg" method="dialog" id="capForm">
+    <h2>Ghi nhanh</h2>
+    <label>Tiêu đề<input type="text" id="capTitle" placeholder="Ví dụ: Ý tưởng activation Tết cho on-trade" autocomplete="off"></label>
+    <label>Nội dung<textarea id="capBody" placeholder="Dán link, đoạn trích, hoặc ghi suy nghĩ. Markdown và [[wikilink]] đều dùng được."></textarea></label>
+    <label>Lưu vào<select id="capDest">
+      <option value="raw/inbox">Inbox, để agent ingest vào wiki</option>
+      <option value="notes">Ghi chú riêng (notes/), agent không sửa</option>
+    </select></label>
+    <div class="msg" id="capMsg"></div>
+    <div class="actions"><button class="btn" type="button" id="capCancel">Hủy</button><button class="btn primary" type="submit">Lưu ghi chú</button></div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const CFG_KEY = "brainweb.cfg";
+const S = { cfg:null, files:[], byPath:new Map(), byName:new Map(), text:new Map(), back:new Map(), current:null, indexed:false };
+
+/* ---------- storage ---------- */
+function loadCfg(){
+  for (const st of [localStorage, sessionStorage]) {
+    try { const v = st.getItem(CFG_KEY); if (v) return JSON.parse(v); } catch(e){}
+  }
+  return null;
+}
+function saveCfg(cfg, remember){
+  try { localStorage.removeItem(CFG_KEY); sessionStorage.removeItem(CFG_KEY); } catch(e){}
+  try { (remember ? localStorage : sessionStorage).setItem(CFG_KEY, JSON.stringify(cfg)); } catch(e){}
+}
+let dbp = null;
+function db(){
+  if (!dbp) dbp = new Promise((res) => {
+    try {
+      const r = indexedDB.open("brainweb", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("blobs");
+      r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+    } catch(e){ res(null); }
+  });
+  return dbp;
+}
+async function cacheGet(sha){
+  const d = await db(); if (!d) return null;
+  return new Promise(res => { try { const q = d.transaction("blobs").objectStore("blobs").get(sha); q.onsuccess=()=>res(q.result??null); q.onerror=()=>res(null);} catch(e){res(null)} });
+}
+async function cachePut(sha, text){
+  const d = await db(); if (!d) return;
+  try { d.transaction("blobs","readwrite").objectStore("blobs").put(text, sha); } catch(e){}
+}
+
+/* ---------- GitHub API ---------- */
+async function gh(path, opts={}){
+  const r = await fetch("https://api.github.com" + path, {
+    ...opts,
+    headers:{ "Authorization":"Bearer " + S.cfg.token, "Accept":"application/vnd.github+json", "X-GitHub-Api-Version":"2022-11-28", ...(opts.headers||{}) }
+  });
+  if (!r.ok) {
+    let detail = ""; try { detail = (await r.json()).message || ""; } catch(e){}
+    const err = new Error(explain(r.status, detail)); err.status = r.status; throw err;
+  }
+  return r.status === 204 ? null : r.json();
+}
+function explain(status, detail){
+  if (status === 401) return "Token sai hoặc đã hết hạn. Tạo token mới rồi kết nối lại.";
+  if (status === 403) return "GitHub từ chối: token thiếu quyền Contents, hoặc đã chạm giới hạn gọi API. " + detail;
+  if (status === 404) return "Không tìm thấy repo hoặc nhánh. Kiểm tra username, tên repo, và token đã được cấp quyền cho repo này chưa.";
+  if (status === 409) return "Ghi chú vừa được sửa ở nơi khác. Bấm ⟳ để tải bản mới rồi sửa lại.";
+  if (status === 422) return "GitHub không nhận thay đổi: " + detail;
+  return "Lỗi " + status + ". " + detail;
+}
+const repoPath = () => `/repos/${encodeURIComponent(S.cfg.owner)}/${encodeURIComponent(S.cfg.repo)}`;
+const encPath = p => p.split("/").map(encodeURIComponent).join("/");
+function b64decode(b64){
+  const bin = atob(b64.replace(/\n/g,"")); const bytes = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+function b64encode(text){
+  const bytes = new TextEncoder().encode(text); let bin = "";
+  for (let i=0;i<bytes.length;i+=0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+
+/* ---------- files & index ---------- */
+const IGNORE = /^(\.obsidian|\.trash|\.git|node_modules)\//;
+async function loadTree(){
+  status("Đang tải danh sách ghi chú…");
+  const t = await gh(`${repoPath()}/git/trees/${encodeURIComponent(S.cfg.branch)}?recursive=1`);
+  S.files = t.tree.filter(x => x.type==="blob" && /\.md$/i.test(x.path) && !IGNORE.test(x.path)).map(x => ({path:x.path, sha:x.sha}));
+  rebuildMaps();
+  renderTree();
+  status(`${S.files.length} ghi chú`);
+}
+function rebuildMaps(){
+  S.byPath = new Map(S.files.map(f => [f.path, f]));
+  S.byName = new Map();
+  const add = (k, p) => { k = k.toLowerCase().trim(); if (!k) return; if (!S.byName.has(k)) S.byName.set(k, []); if (!S.byName.get(k).includes(p)) S.byName.get(k).push(p); };
+  for (const f of S.files) {
+    add(baseName(f.path), f.path);
+    add(f.path.replace(/\.md$/i,""), f.path);
+    const txt = S.text.get(f.sha);
+    if (txt) { const fm = frontmatter(txt).data; for (const a of fm.aliases||[]) add(a, f.path); if (fm.title) add(fm.title, f.path); }
+  }
+}
+const baseName = p => p.split("/").pop().replace(/\.md$/i,"");
+async function getText(f){
+  if (S.text.has(f.sha)) return S.text.get(f.sha);
+  let t = await cacheGet(f.sha);
+  if (t == null) { const b = await gh(`${repoPath()}/git/blobs/${f.sha}`); t = b64decode(b.content); cachePut(f.sha, t); }
+  S.text.set(f.sha, t); return t;
+}
+async function indexAll(){
+  const todo = S.files.slice(); let done = 0;
+  const worker = async () => { while (todo.length) { const f = todo.shift(); try { await getText(f); } catch(e){} done++; if (done % 10 === 0) status(`Đang đọc nội dung ${done}/${S.files.length}…`); } };
+  await Promise.all(Array.from({length:6}, worker));
+  rebuildMaps(); buildBacklinks(); S.indexed = true;
+  status(`${S.files.length} ghi chú · sẵn sàng tìm kiếm`);
+  if (S.current) renderBacklinks(S.current);
+  if ($("search").value.trim()) runSearch();
+}
+function resolve(target){
+  let t = target.split("|")[0].split("#")[0].trim().replace(/\.md$/i,"");
+  if (!t) return null;
+  const hits = S.byName.get(t.toLowerCase()) || [];
+  if (hits.length) return hits.slice().sort((a,b)=>a.length-b.length)[0];
+  for (const f of S.files) if (f.path.toLowerCase().endsWith("/" + t.toLowerCase() + ".md")) return f.path;
+  return null;
+}
+const WL = /(!?)\[\[([^\]\n]+?)\]\]/g;
+function buildBacklinks(){
+  S.back = new Map();
+  for (const f of S.files) {
+    const txt = S.text.get(f.sha); if (!txt) continue;
+    for (const m of txt.matchAll(WL)) {
+      const to = resolve(m[2]); if (!to || to === f.path) continue;
+      if (!S.back.has(to)) S.back.set(to, new Set());
+      S.back.get(to).add(f.path);
+    }
+  }
+}
+
+/* ---------- markdown ---------- */
+function frontmatter(txt){
+  const m = txt.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return {data:{}, body:txt};
+  const data = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/); if (!kv) continue;
+    let v = kv[2].trim();
+    if (/^\[.*\]$/.test(v)) v = v.slice(1,-1).split(",").map(s => s.trim().replace(/^["']|["']$/g,"")).filter(Boolean);
+    else v = v.replace(/^["']|["']$/g,"");
+    data[kv[1]] = v;
+  }
+  return {data, body: txt.slice(m[0].length)};
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function renderMd(body){
+  const withLinks = body.replace(WL, (all, bang, inner) => {
+    const [target, alias] = inner.split("|");
+    const label = esc((alias || target.split("/").pop()).trim());
+    if (bang) return `<span class="wl">📎 ${label}</span>`;
+    const to = resolve(target);
+    return to ? `<a class="wl" href="#/${encPath(to)}">${label}</a>` : `<span class="wl missing" title="Chưa có trang này">${label}</span>`;
+  });
+  const html = DOMPurify.sanitize(marked.parse(withLinks, {gfm:true, breaks:true}));
+  const box = document.createElement("div"); box.innerHTML = html;
+  box.querySelectorAll('a[href^="http"]').forEach(a => { a.target = "_blank"; a.rel = "noopener"; });
+  return box.innerHTML;
+}
+
+/* ---------- views ---------- */
+function status(t){ $("status").textContent = t; }
+function toast(t){ const d = document.createElement("div"); d.className="toast"; d.textContent=t; document.body.appendChild(d); setTimeout(()=>d.remove(), 2600); }
+
+function renderTree(){
+  const root = {dirs:{}, files:[]};
+  for (const f of S.files) {
+    const parts = f.path.split("/"); let node = root;
+    for (const p of parts.slice(0,-1)) node = node.dirs[p] ||= {dirs:{}, files:[]};
+    node.files.push(f.path);
+  }
+  const openByDefault = new Set(["wiki","notes","raw","inbox"]);
+  const rootOrder = ["index","log","CLAUDE"];
+  const walk = (node, depth, name) => {
+    let h = "";
+    const files = node.files.slice().sort((a,b) => {
+      if (depth===0) { const ia = rootOrder.indexOf(baseName(a)), ib = rootOrder.indexOf(baseName(b)); if (ia!==-1||ib!==-1) return (ia===-1?99:ia)-(ib===-1?99:ib); }
+      return baseName(a).localeCompare(baseName(b), "vi");
+    });
+    for (const d of Object.keys(node.dirs).sort((a,b)=>a.localeCompare(b,"vi"))) {
+      if (d === "templates" && depth === 0) continue;
+      h += `<details ${openByDefault.has(d)?"open":""}><summary>${esc(d)}</summary>${walk(node.dirs[d], depth+1, d)}</details>`;
+    }
+    for (const p of files) h += `<a href="#/${encPath(p)}" data-path="${esc(p)}">${esc(baseName(p))}</a>`;
+    return h;
+  };
+  $("tree").innerHTML = walk(root, 0, "") || `<p class="empty" style="padding:8px">Vault trống.</p>`;
+  markActive();
+}
+function markActive(){ $("tree").querySelectorAll("a").forEach(a => a.classList.toggle("active", a.dataset.path === S.current)); }
+
+async function openNote(path){
+  const f = S.byPath.get(path);
+  if (!f) { $("view").innerHTML = `<p class="empty">Không tìm thấy <b>${esc(path)}</b>. Có thể nó vừa bị đổi tên. Bấm ⟳ để tải lại.</p>`; return; }
+  S.current = path; markActive(); showView();
+  $("crumb").textContent = path.replace(/\.md$/i,"");
+  $("view").innerHTML = `<p class="empty">Đang mở…</p>`;
+  try {
+    const txt = await getText(f);
+    if (S.current !== path) return;
+    const {data, body} = frontmatter(txt);
+    const title = data.title || baseName(path);
+    const props = ["type","status","updated","tags"].filter(k => data[k] && data[k].length).map(k => `<span>${k} <b>${esc(Array.isArray(data[k])?data[k].join(", "):data[k])}</b></span>`).join("");
+    const hasH1 = /^#\s/m.test(body.split("\n").find(l=>l.trim()) || "");
+    $("view").innerHTML = (hasH1 ? "" : `<h1>${esc(title)}</h1>`) + renderMd(body) + `<div class="backlinks" id="bl"></div>`;
+    const h1 = $("view").querySelector("h1");
+    if (props && h1) h1.insertAdjacentHTML("afterend", `<div class="props">${props}</div>`);
+    renderBacklinks(path);
+    $("viewWrap").scrollTop = 0;
+    document.title = title + " · Second Brain";
+  } catch(e) { $("view").innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+  $("side").classList.remove("open");
+}
+function renderBacklinks(path){
+  const el = $("bl"); if (!el || S.current !== path) return;
+  if (!S.indexed) { el.innerHTML = `<h4>Trang liên kết tới đây</h4><p class="empty">Đang đọc toàn bộ vault…</p>`; return; }
+  const list = [...(S.back.get(path) || [])].sort();
+  el.innerHTML = `<h4>Trang liên kết tới đây (${list.length})</h4>` + (list.length ? list.map(p => `<a href="#/${encPath(p)}">${esc(baseName(p))}</a>`).join("") : `<p class="empty">Chưa có trang nào link tới đây.</p>`);
+}
+
+function runSearch(){
+  const q = $("search").value.trim().toLowerCase();
+  if (!q) { renderTree(); return; }
+  const norm = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").toLowerCase();
+  const nq = norm(q);
+  const out = [];
+  for (const f of S.files) {
+    const name = norm(f.path); const txt = S.text.get(f.sha) || ""; const nt = norm(txt);
+    let score = 0, snip = "";
+    if (name.includes(nq)) score += 10;
+    const i = nt.indexOf(nq);
+    if (i !== -1) { score += 1; snip = txt.slice(Math.max(0,i-40), i+80).replace(/\s+/g," "); }
+    if (score) out.push({f, score, snip});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  const note = S.indexed ? "" : `<p class="status" style="padding:0 8px">Đang đọc vault, kết quả nội dung sẽ đầy đủ hơn sau ít giây.</p>`;
+  $("tree").innerHTML = note + (out.slice(0,60).map(r => `<a class="result" href="#/${encPath(r.f.path)}"><b>${esc(baseName(r.f.path))}</b><small>${esc(r.f.path)}</small>${r.snip?`<small>…${esc(r.snip)}…</small>`:""}</a>`).join("") || `<p class="empty" style="padding:8px">Không có ghi chú nào chứa “${esc(q)}”.</p>`);
+}
+
+/* ---------- write ---------- */
+async function putFile(path, text, sha, message){
+  const body = {message, content:b64encode(text), branch:S.cfg.branch}; if (sha) body.sha = sha;
+  const r = await gh(`${repoPath()}/contents/${encPath(path)}`, {method:"PUT", body:JSON.stringify(body)});
+  const newSha = r.content.sha;
+  S.text.set(newSha, text); cachePut(newSha, text);
+  const existing = S.byPath.get(path);
+  if (existing) existing.sha = newSha; else S.files.push({path, sha:newSha});
+  rebuildMaps(); if (S.indexed) buildBacklinks();
+  return newSha;
+}
+function showView(){ $("editWrap").classList.add("hidden"); $("viewWrap").classList.remove("hidden"); $("editBtn").textContent = "Sửa"; }
+async function startEdit(){
+  if (!S.current) return;
+  if (!$("editWrap").classList.contains("hidden")) { showView(); return; }
+  const f = S.byPath.get(S.current);
+  $("editText").value = await getText(f);
+  $("editMsg").textContent = ""; $("editMsg").className = "msg";
+  $("viewWrap").classList.add("hidden"); $("editWrap").classList.remove("hidden"); $("editBtn").textContent = "Xem";
+  $("editText").focus();
+}
+async function saveEdit(){
+  const f = S.byPath.get(S.current); const btn = $("saveEdit");
+  btn.disabled = true; $("editMsg").className="msg"; $("editMsg").textContent = "Đang lưu…";
+  try { await putFile(f.path, $("editText").value, f.sha, `edit(web): ${f.path}`); toast("Đã lưu lên GitHub"); openNote(f.path); }
+  catch(e) { $("editMsg").className="msg err"; $("editMsg").textContent = e.message; }
+  btn.disabled = false;
+}
+function slug(s){
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[đĐ]/g,"d").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60) || "ghi-chu";
+}
+async function saveCapture(ev){
+  ev.preventDefault();
+  const title = $("capTitle").value.trim(); const body = $("capBody").value;
+  if (!title && !body.trim()) { $("capMsg").className="msg err"; $("capMsg").textContent="Ghi tiêu đề hoặc nội dung trước khi lưu."; return; }
+  const now = new Date(); const pad = n => String(n).padStart(2,"0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const dest = $("capDest").value;
+  const name = dest === "raw/inbox" ? `${stamp}-${pad(now.getHours())}${pad(now.getMinutes())}-${slug(title || body.slice(0,40))}` : slug(title || body.slice(0,40));
+  let path = `${dest}/${name}.md`; let n = 2; while (S.byPath.has(path)) path = `${dest}/${name}-${n++}.md`;
+  const t = title || body.trim().split("\n")[0].slice(0,80);
+  const content = `---\ntitle: "${t.replace(/"/g,"'")}"\ntype: ${dest==="notes"?"note":"inbox"}\ncaptured: ${now.toISOString()}\nvia: web\n---\n\n# ${t}\n\n${body.trim()}\n`;
+  $("capMsg").className="msg"; $("capMsg").textContent="Đang lưu…";
+  try {
+    await putFile(path, content, null, `capture(web): ${path}`);
+    $("capDlg").close(); $("capTitle").value=""; $("capBody").value=""; $("capMsg").textContent="";
+    renderTree(); toast(dest==="raw/inbox" ? "Đã lưu vào inbox" : "Đã lưu vào notes"); location.hash = "#/" + encPath(path);
+  } catch(e) { $("capMsg").className="msg err"; $("capMsg").textContent=e.message; }
+}
+
+/* ---------- boot ---------- */
+function route(){
+  const h = decodeURIComponent(location.hash.replace(/^#\/?/,""));
+  if (h) openNote(h);
+  else if (S.byPath.has("index.md")) openNote("index.md");
+  else $("view").innerHTML = `<p class="empty">Chọn một ghi chú ở cột trái, hoặc bấm Ghi nhanh để tạo ghi chú đầu tiên.</p>`;
+}
+async function connect(){
+  try { await loadTree(); route(); indexAll(); return true; }
+  catch(e) { status(e.message); $("view").innerHTML = `<p class="empty">${esc(e.message)}</p>`; throw e; }
+}
+function openSetup(msg){
+  const c = S.cfg || {};
+  $("cfgOwner").value = c.owner || ""; $("cfgRepo").value = c.repo || "second-brain"; $("cfgBranch").value = c.branch || "main";
+  $("cfgToken").value = c.token || ""; $("cfgRemember").checked = !!c.remember;
+  $("setupMsg").className = "msg" + (msg?" err":""); $("setupMsg").textContent = msg || "";
+  $("setupDlg").showModal();
+}
+$("setupForm").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const cfg = { owner:$("cfgOwner").value.trim(), repo:$("cfgRepo").value.trim(), branch:$("cfgBranch").value.trim()||"main", token:$("cfgToken").value.trim(), remember:$("cfgRemember").checked };
+  S.cfg = cfg; S.text = new Map(); S.indexed = false;
+  $("setupMsg").className="msg"; $("setupMsg").textContent = "Đang kết nối…";
+  try { await connect(); saveCfg(cfg, cfg.remember); $("setupDlg").close(); toast("Đã kết nối vault"); }
+  catch(e) { $("setupMsg").className="msg err"; $("setupMsg").textContent = e.message; }
+});
+$("forgetBtn").addEventListener("click", async () => {
+  saveCfg(null,false); try{localStorage.removeItem(CFG_KEY);sessionStorage.removeItem(CFG_KEY);}catch(e){}
+  try { indexedDB.deleteDatabase("brainweb"); } catch(e){}
+  S.cfg = null; $("cfgToken").value = ""; $("setupMsg").className="msg ok"; $("setupMsg").textContent = "Đã xóa token và bộ nhớ đệm khỏi trình duyệt này.";
+});
+$("settingsBtn").onclick = () => openSetup();
+$("refreshBtn").onclick = async () => { if (!S.cfg) return openSetup(); S.indexed=false; try { await loadTree(); if (S.current) openNote(S.current); indexAll(); toast("Đã tải bản mới nhất"); } catch(e){ toast(e.message); } };
+$("captureBtn").onclick = () => { if (!S.cfg) return openSetup(); $("capMsg").textContent=""; $("capDlg").showModal(); $("capTitle").focus(); };
+$("capCancel").onclick = () => $("capDlg").close();
+$("capForm").addEventListener("submit", saveCapture);
+$("editBtn").onclick = startEdit;
+$("cancelEdit").onclick = showView;
+$("saveEdit").onclick = saveEdit;
+$("menuBtn").onclick = () => $("side").classList.toggle("open");
+$("search").addEventListener("input", runSearch);
+window.addEventListener("hashchange", route);
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="k") { e.preventDefault(); $("search").focus(); }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="s" && !$("editWrap").classList.contains("hidden")) { e.preventDefault(); saveEdit(); }
+});
+document.addEventListener("click", e => { if ($("side").classList.contains("open") && !$("side").contains(e.target) && e.target !== $("menuBtn")) $("side").classList.remove("open"); });
+
+S.cfg = loadCfg();
+if (S.cfg) connect().catch(e => openSetup(e.message)); else openSetup();
+})();
+</script>
+</body>
+</html>
